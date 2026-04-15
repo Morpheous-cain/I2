@@ -1,4 +1,14 @@
+/**
+ * Contact — form section.
+ *
+ * 3D↔UI integration:
+ *  - Left panel parallaxes with mouse/rotation (useContactAnimation)
+ *  - Submit button colour + glow track planet light + variant
+ *  - Input focus ring colour matches variant accent
+ *  - Tag badges pulse with atmosphere
+ */
 "use client";
+
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Send, Loader2, CheckCircle2, Mail, MessageSquare, User } from "lucide-react";
@@ -6,12 +16,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { usePlanet } from "@/context/PlanetContext";
+import { useContactAnimation, useSectionHeaderAnimation } from "@/hooks/useSceneAnimations";
 
 type Status = "idle" | "loading" | "success" | "error";
 
 export default function Contact() {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [status, setStatus] = useState<Status>("idle");
+  const { signals } = usePlanet();
+  const { submitStyle, leftStyle } = useContactAnimation();
+  const { skewStyle } = useSectionHeaderAnimation();
+  const { h, s, l } = signals.accentColorRaw;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
@@ -35,42 +51,70 @@ export default function Contact() {
     }
   };
 
+  // Shared input className
+  const inputClass =
+    "glass border-white/8 bg-transparent text-foreground placeholder:text-muted-foreground/40 h-11 rounded-xl transition-all duration-300";
+
   return (
     <section id="contact" className="py-28 relative">
-      {/* Background glow */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-cyan-500/6 rounded-full blur-[120px] pointer-events-none" />
+      {/* Bottom glow */}
+      <div
+        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] rounded-full pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse at center, hsl(${h} ${s}% ${l}% / ${(0.04 + signals.pulse * 0.03).toFixed(3)}) 0%, transparent 70%)`,
+          filter: "blur(80px)",
+          transition: "background 0.4s ease",
+        }}
+      />
 
       <div className="max-w-6xl mx-auto px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-start">
 
-          {/* Left — heading */}
+          {/* Left — heading + contact info, parallaxes with mouse */}
           <motion.div
             initial={{ opacity: 0, x: -24 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6 }}
             className="lg:sticky lg:top-28"
+            style={leftStyle}
           >
-            <p className="font-mono text-xs tracking-[0.25em] text-cyan-400/70 uppercase mb-4">
-              GET IN TOUCH
-            </p>
-            <h2 className="font-display text-4xl md:text-5xl font-black tracking-tight mb-6">
-              Ready to build{" "}
-              <span className="text-gradient">beyond?</span>
-            </h2>
+            <div style={skewStyle}>
+              <p
+                className="font-mono text-xs tracking-[0.25em] uppercase mb-4"
+                style={{ color: `hsl(${h} ${s}% ${l}% / 0.7)` }}
+              >
+                GET IN TOUCH
+              </p>
+              <h2 className="font-display text-4xl md:text-5xl font-black tracking-tight mb-6">
+                Ready to build{" "}
+                <span
+                  className="bg-clip-text text-transparent"
+                  style={{ backgroundImage: `linear-gradient(135deg, hsl(${h} ${s}% ${Math.round(l + signals.lightFacing * 15)}%), hsl(${h} ${s}% ${l}%))` }}
+                >
+                  beyond?
+                </span>
+              </h2>
+            </div>
+
             <p className="text-muted-foreground text-lg leading-relaxed mb-8 max-w-md">
-              Tell us about your project. Our solutions engineers respond within
-              one business day with a tailored technical proposal.
+              Tell us about your project. Our solutions engineers respond within one business day with a tailored technical proposal.
             </p>
 
             <div className="flex flex-col gap-4">
               {[
-                { icon: Mail, label: "hello@immersicloud.io" },
-                { icon: MessageSquare, label: "Live chat — avg. 4 min response" },
+                { icon: Mail,            label: "hello@immersicloud.io"           },
+                { icon: MessageSquare,   label: "Live chat — avg. 4 min response" },
               ].map(({ icon: Icon, label }) => (
                 <div key={label} className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
-                    <Icon className="w-3.5 h-3.5 text-cyan-400" />
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 border transition-all duration-300"
+                    style={{
+                      background: `hsl(${h} ${s}% ${l}% / ${(0.08 + signals.pulse * 0.06).toFixed(3)})`,
+                      borderColor: `hsl(${h} ${s}% ${l}% / ${(0.18 + signals.lightFacing * 0.2).toFixed(2)})`,
+                    }}
+                  >
+                    <Icon className="w-3.5 h-3.5" style={{ color: `hsl(${h} ${s}% ${Math.round(l + 10)}%)` }} />
                   </div>
                   {label}
                 </div>
@@ -82,7 +126,11 @@ export default function Contact() {
                 <Badge
                   key={tag}
                   variant="secondary"
-                  className="glass border border-white/8 text-muted-foreground font-mono text-xs"
+                  className="glass font-mono text-xs"
+                  style={{
+                    borderColor: `hsl(${h} ${s}% ${l}% / ${(0.08 + signals.pulse * 0.08).toFixed(3)})`,
+                    transition: "border-color 0.4s ease",
+                  }}
                 >
                   {tag}
                 </Badge>
@@ -101,9 +149,10 @@ export default function Contact() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="glass border border-cyan-500/20 rounded-2xl p-12 flex flex-col items-center text-center gap-4"
+                className="glass border rounded-2xl p-12 flex flex-col items-center text-center gap-4"
+                style={{ borderColor: `hsl(${h} ${s}% ${l}% / 0.25)` }}
               >
-                <CheckCircle2 className="w-12 h-12 text-cyan-400" />
+                <CheckCircle2 className="w-12 h-12" style={{ color: `hsl(${h} ${s}% ${l}%)` }} />
                 <h3 className="font-display text-xl font-bold">Message received</h3>
                 <p className="text-muted-foreground text-sm max-w-xs">
                   Our team will reach out within one business day with next steps.
@@ -112,7 +161,7 @@ export default function Contact() {
                   variant="outline"
                   size="sm"
                   onClick={() => setStatus("idle")}
-                  className="mt-2 border-white/10 hover:border-cyan-500/30"
+                  className="mt-2 border-white/10 hover:border-white/20"
                 >
                   Send another
                 </Button>
@@ -132,7 +181,8 @@ export default function Contact() {
                     onChange={handleChange}
                     placeholder="Your name"
                     required
-                    className="glass border-white/8 focus:border-cyan-500/40 bg-transparent text-foreground placeholder:text-muted-foreground/40 h-11 rounded-xl"
+                    className={inputClass}
+                    style={{ "--tw-ring-color": `hsl(${h} ${s}% ${l}% / 0.5)` } as React.CSSProperties}
                   />
                 </div>
 
@@ -147,7 +197,7 @@ export default function Contact() {
                     onChange={handleChange}
                     placeholder="you@company.com"
                     required
-                    className="glass border-white/8 focus:border-cyan-500/40 bg-transparent text-foreground placeholder:text-muted-foreground/40 h-11 rounded-xl"
+                    className={inputClass}
                   />
                 </div>
 
@@ -162,31 +212,24 @@ export default function Contact() {
                     placeholder="Tell us about your project and goals..."
                     required
                     rows={5}
-                    className="glass border-white/8 focus:border-cyan-500/40 bg-transparent text-foreground placeholder:text-muted-foreground/40 rounded-xl resize-none"
+                    className="glass border-white/8 bg-transparent text-foreground placeholder:text-muted-foreground/40 rounded-xl resize-none"
                   />
                 </div>
 
                 {status === "error" && (
-                  <p className="text-xs text-red-400 font-mono">
-                    Something went wrong. Please try again.
-                  </p>
+                  <p className="text-xs text-red-400 font-mono">Something went wrong. Please try again.</p>
                 )}
 
                 <Button
                   type="submit"
                   disabled={status === "loading"}
-                  className="w-full h-12 bg-cyan-500 hover:bg-cyan-400 text-background font-bold rounded-xl glow-cyan-sm transition-all duration-300"
+                  className="w-full h-12 text-background font-bold rounded-xl"
+                  style={submitStyle}
                 >
                   {status === "loading" ? (
-                    <>
-                      <Loader2 className="mr-2 w-4 h-4 animate-spin" />
-                      Sending…
-                    </>
+                    <><Loader2 className="mr-2 w-4 h-4 animate-spin" />Sending…</>
                   ) : (
-                    <>
-                      <Send className="mr-2 w-4 h-4" />
-                      Send Message
-                    </>
+                    <><Send className="mr-2 w-4 h-4" />Send Message</>
                   )}
                 </Button>
               </form>

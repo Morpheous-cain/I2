@@ -1,16 +1,17 @@
+/**
+ * PlanetCanvas — R3F Canvas wrapper.
+ *
+ * Reads isHovered / setIsHovered / cycleVariant from PlanetContext directly,
+ * removing the need for prop-drilling from Hero.
+ * PlanetScene also reads from context, so no props flow into the Canvas at all.
+ */
 "use client";
+
 import { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, AdaptiveDpr, AdaptiveEvents } from "@react-three/drei";
 import PlanetScene from "./PlanetScene";
-import type { PlanetState } from "@/hooks/usePlanetState";
-
-interface PlanetCanvasProps {
-  state: PlanetState;
-  onHoverStart: () => void;
-  onHoverEnd: () => void;
-  onClick: () => void;
-}
+import { usePlanet } from "@/context/PlanetContext";
 
 function LoadingFallback() {
   return (
@@ -20,33 +21,28 @@ function LoadingFallback() {
   );
 }
 
-export default function PlanetCanvas({
-  state,
-  onHoverStart,
-  onHoverEnd,
-  onClick,
-}: PlanetCanvasProps) {
+export default function PlanetCanvas() {
+  const { setIsHovered, cycleVariant } = usePlanet();
+
   return (
     <div
       className="w-full h-full cursor-pointer"
-      onMouseEnter={onHoverStart}
-      onMouseLeave={onHoverEnd}
-      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={cycleVariant}
+      role="button"
+      aria-label="Click to cycle planet mode"
     >
       <Suspense fallback={<LoadingFallback />}>
         <Canvas
           camera={{ position: [0, 0, 10], fov: 45 }}
           dpr={[1, 2]}
-          gl={{
-            antialias: true,
-            alpha: true,
-            powerPreference: "high-performance",
-          }}
+          gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
           style={{ background: "transparent" }}
         >
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
-          <PlanetScene state={state} />
+          <PlanetScene />
           <OrbitControls
             enableZoom={false}
             enablePan={false}
