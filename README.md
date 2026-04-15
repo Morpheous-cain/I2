@@ -14,4 +14,3 @@ npm run dev
 ## Notes
 Run:
 npx shadcn@latest init
-"# I2" 
