@@ -1,15 +1,3 @@
-/**
- * PlanetScene — Three.js scene rendered inside R3F Canvas.
- *
- * Responsibilities:
- *  1. Render planet, atmosphere, rings, data orbits, stars.
- *  2. Push SceneFrame data to PlanetContext every R3F frame via emitFrame().
- *     This is the 3D→UI direction of the bidirectional pipeline.
- *
- * emitFrame() is called inside useFrame() which runs outside React's render
- * cycle — it writes to a ref in PlanetContext, never triggering re-renders.
- * A separate rAF loop in PlanetContext reads that ref and derives CSS signals.
- */
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -20,7 +8,6 @@ import * as THREE from "three";
 import { usePlanet, VARIANT_CONFIG } from "@/context/PlanetContext";
 import type { HeroVariant } from "@/context/PlanetContext";
 
-// JSX element aliases — R3F extends intrinsics at runtime; we bypass TS here.
 const m = {
   mesh:              "mesh"              as any,
   group:             "group"             as any,
@@ -36,13 +23,8 @@ const m = {
   pointLight:        "pointLight"        as any,
 };
 
-// ─── Scene frame emitter ──────────────────────────────────────────────────────
+// ─── Frame emitter ─────────────────────────────────────────────────────────
 
-/**
- * Invisible component that lives inside Canvas.
- * Reads planet rotation + computes derived frame data, then pushes it to
- * PlanetContext every R3F tick via emitFrame (a ref-write, zero React cost).
- */
 function FrameEmitter({
   planetRef,
   variant,
@@ -58,16 +40,14 @@ function FrameEmitter({
     const elapsed = (performance.now() - startTime.current) / 1000;
     const rotationY = planetRef.current.rotation.y;
     const lightIntensity = VARIANT_CONFIG[variant].atmosphereIntensity;
-    // Slow sine 0–1 for atmosphere breathing
     const pulsePhase = Math.sin(elapsed * 0.8) * 0.5 + 0.5;
-
     emitFrame({ rotationY, lightIntensity, pulsePhase, elapsed });
   });
 
   return null;
 }
 
-// ─── Planet core ──────────────────────────────────────────────────────────────
+// ─── Planet core — distinct visuals per variant ─────────────────────────────
 
 function PlanetCore({
   variant,
@@ -81,11 +61,13 @@ function PlanetCore({
   const cfg = VARIANT_CONFIG[variant];
   const speed = isHovered ? cfg.rotationSpeed * 1.6 : cfg.rotationSpeed;
 
-  const colorMap: Record<HeroVariant, string> = {
-    explore: "#0ecbdb",
-    build:   "#3b82f6",
-    deploy:  "#06b6d4",
+  // Dramatically different colors per variant
+  const colorMap: Record<HeroVariant, { base: string; emissive: string; distort: number }> = {
+    explore: { base: "#0f4c6e", emissive: "#7dd3fc", distort: 0.10 }, // icy blue-white ocean
+    build:   { base: "#7c2d0a", emissive: "#fb923c", distort: 0.20 }, // molten rocky surface
+    deploy:  { base: "#3b0764", emissive: "#c084fc", distort: 0.15 }, // deep violet energy
   };
+  const c = colorMap[variant];
 
   useFrame((_, delta) => {
     if (meshRef.current) {
@@ -97,19 +79,19 @@ function PlanetCore({
     <m.mesh ref={meshRef} castShadow>
       <m.sphereGeometry args={[2.2, 64, 64]} />
       <MeshDistortMaterial
-        color={colorMap[variant]}
-        distort={isHovered ? 0.18 : 0.12}
+        color={c.base}
+        distort={isHovered ? c.distort + 0.06 : c.distort}
         speed={cfg.rotationSpeed * 0.8}
-        roughness={0.6}
-        metalness={0.3}
-        emissive={colorMap[variant]}
-        emissiveIntensity={isHovered ? 0.12 : 0.06}
+        roughness={0.55}
+        metalness={0.4}
+        emissive={c.emissive}
+        emissiveIntensity={isHovered ? 0.18 : 0.09}
       />
     </m.mesh>
   );
 }
 
-// ─── Atmosphere ───────────────────────────────────────────────────────────────
+// ─── Atmosphere ─────────────────────────────────────────────────────────────
 
 function AtmosphereGlow({ variant, isHovered }: { variant: HeroVariant; isHovered: boolean }) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -126,9 +108,9 @@ function AtmosphereGlow({ variant, isHovered }: { variant: HeroVariant; isHovere
 
   return (
     <m.mesh ref={meshRef}>
-      <m.sphereGeometry args={[2.55, 32, 32]} />
+      <m.sphereGeometry args={[2.58, 32, 32]} />
       <m.meshBasicMaterial
-        color={color} transparent opacity={0.06 * intensity}
+        color={color} transparent opacity={0.07 * intensity}
         side={THREE.BackSide} depthWrite={false}
       />
     </m.mesh>
@@ -150,31 +132,68 @@ function OuterGlow({ variant, isHovered }: { variant: HeroVariant; isHovered: bo
 
   return (
     <m.mesh ref={meshRef}>
-      <m.sphereGeometry args={[3.0, 32, 32]} />
+      <m.sphereGeometry args={[3.2, 32, 32]} />
       <m.meshBasicMaterial
-        color={color} transparent opacity={0.025 * intensity}
+        color={color} transparent opacity={0.03 * intensity}
         side={THREE.BackSide} depthWrite={false}
       />
     </m.mesh>
   );
 }
 
-// ─── Orbital rings ────────────────────────────────────────────────────────────
+// ─── Self-orbiting rings — each has its own tilt pivot group ───────────────
+//
+// Pattern: outer <group> tilts the orbital plane; inner mesh spins on Z.
+// This means the ring sweeps a full orbit around the planet instead of
+// just spinning in place. Speed + direction vary per ring for visual depth.
 
 function OrbitalRing({
-  radius, tilt, speed, color, opacity,
-}: { radius: number; tilt: number; speed: number; color: string; opacity: number }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  useFrame((_, delta) => { if (meshRef.current) meshRef.current.rotation.z += delta * speed; });
+  radius,
+  tiltX,
+  tiltY,
+  speed,       // radians/sec — positive = counter-clockwise from above
+  color,
+  opacity,
+  thickness = 0.03,
+}: {
+  radius: number;
+  tiltX: number;
+  tiltY: number;
+  speed: number;
+  color: string;
+  opacity: number;
+  thickness?: number;
+}) {
+  const pivotRef = useRef<THREE.Group>(null);
+
+  useFrame((_, delta) => {
+    if (pivotRef.current) {
+      // Rotate the pivot around world Y — this makes the ring orbit, not spin
+      pivotRef.current.rotation.y += delta * speed;
+    }
+  });
+
   return (
-    <m.mesh ref={meshRef} rotation={[tilt, 0, 0]}>
-      <m.ringGeometry args={[radius - 0.03, radius + 0.03, 128]} />
-      <m.meshBasicMaterial color={color} transparent opacity={opacity} side={THREE.DoubleSide} depthWrite={false} />
-    </m.mesh>
+    // Tilt group: sets the orbital plane inclination
+    <m.group rotation={[tiltX, tiltY, 0]}>
+      {/* Pivot group: rotates to simulate orbital motion */}
+      <m.group ref={pivotRef}>
+        <m.mesh>
+          <m.ringGeometry args={[radius - thickness, radius + thickness, 180]} />
+          <m.meshBasicMaterial
+            color={color}
+            transparent
+            opacity={opacity}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </m.mesh>
+      </m.group>
+    </m.group>
   );
 }
 
-// ─── Orbiting data nodes ──────────────────────────────────────────────────────
+// ─── Orbiting data nodes ────────────────────────────────────────────────────
 
 function DataOrbit({
   radius, speed, offset, color,
@@ -187,47 +206,49 @@ function DataOrbit({
       const t = clock.getElapsedTime() * speed + offset;
       groupRef.current.position.set(
         Math.cos(t) * radius,
-        Math.sin(t * 0.3) * 0.3,
+        Math.sin(t * 0.4) * 0.5,
         Math.sin(t) * radius,
       );
     }
     if (dotRef.current) {
-      dotRef.current.scale.setScalar(Math.sin(clock.getElapsedTime() * 3 + offset) * 0.2 + 0.8);
+      dotRef.current.scale.setScalar(Math.sin(clock.getElapsedTime() * 3 + offset) * 0.25 + 0.8);
     }
   });
 
   return (
     <m.group ref={groupRef}>
       <m.mesh ref={dotRef}>
-        <m.sphereGeometry args={[0.06, 8, 8]} />
+        <m.sphereGeometry args={[0.07, 8, 8]} />
         <m.meshBasicMaterial color={color} />
       </m.mesh>
     </m.group>
   );
 }
 
-// ─── Stars ────────────────────────────────────────────────────────────────────
+// ─── Stars ──────────────────────────────────────────────────────────────────
 
 function Stars() {
   const starsRef = useRef<THREE.Points>(null);
 
   const { positions, sizes } = useMemo(() => {
-    const count = 800;
+    const count = 900;
     const pos = new Float32Array(count * 3);
     const sz  = new Float32Array(count);
     for (let i = 0; i < count; i++) {
-      const r     = 18 + Math.random() * 30;
+      const r     = 18 + Math.random() * 32;
       const theta = Math.random() * Math.PI * 2;
       const phi   = Math.acos(2 * Math.random() - 1);
       pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
       pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       pos[i * 3 + 2] = r * Math.cos(phi);
-      sz[i] = Math.random() * 0.8 + 0.1;
+      sz[i] = Math.random() * 0.9 + 0.1;
     }
     return { positions: pos, sizes: sz };
   }, []);
 
-  useFrame((_, delta) => { if (starsRef.current) starsRef.current.rotation.y += delta * 0.005; });
+  useFrame((_, delta) => {
+    if (starsRef.current) starsRef.current.rotation.y += delta * 0.004;
+  });
 
   return (
     <m.points ref={starsRef}>
@@ -235,56 +256,83 @@ function Stars() {
         <m.bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
         <m.bufferAttribute attach="attributes-size"     count={sizes.length}          array={sizes}      itemSize={1} />
       </m.bufferGeometry>
-      <m.pointsMaterial color="#a0d8ef" size={0.08} sizeAttenuation transparent opacity={0.7} />
+      {/* White-ish stars for the snow/white accent */}
+      <m.pointsMaterial color="#e0eeff" size={0.09} sizeAttenuation transparent opacity={0.75} />
     </m.points>
   );
 }
 
-// ─── Root export ──────────────────────────────────────────────────────────────
+// ─── Root ───────────────────────────────────────────────────────────────────
 
 export default function PlanetScene() {
-  // Read from context — this component lives inside R3F Canvas
   const { variant, isHovered } = usePlanet();
-
-  // Stable ref so FrameEmitter can read current rotation without prop drilling
   const planetMeshRef = useRef<THREE.Mesh>(null);
 
-  const colorMap: Record<HeroVariant, string> = {
-    explore: "#0ecbdb",
-    build:   "#3b82f6",
-    deploy:  "#06b6d4",
+  const orbitColor = VARIANT_CONFIG[variant].glowColor;
+  const ringOpacity = isHovered ? 0.4 : 0.28;
+
+  // Variant-specific light colours
+  const lightColorMap: Record<HeroVariant, string> = {
+    explore: "#7dd3fc",
+    build:   "#fb923c",
+    deploy:  "#c084fc",
   };
-  const orbitColor  = colorMap[variant];
-  const ringOpacity = isHovered ? 0.35 : 0.22;
+  const lightColor = lightColorMap[variant];
 
   return (
     <>
       {/* Lighting */}
-      <m.ambientLight intensity={0.15} />
-      <m.directionalLight position={[8, 5, 5]} intensity={1.2} color="#ffffff" castShadow />
-      <m.pointLight position={[-5, -3, -5]} intensity={0.4} color={orbitColor} />
-      <m.pointLight position={[0, 0, 6]} intensity={isHovered ? 0.6 : 0.3} color={orbitColor} distance={12} />
+      <m.ambientLight intensity={0.12} />
+      <m.directionalLight position={[8, 5, 5]} intensity={1.4} color="#ffffff" castShadow />
+      <m.pointLight position={[-6, -3, -5]} intensity={0.5} color={lightColor} />
+      <m.pointLight position={[0, 0, 7]} intensity={isHovered ? 0.7 : 0.35} color={lightColor} distance={14} />
 
-      {/* Frame telemetry emitter (invisible, reads planetMeshRef) */}
       <FrameEmitter planetRef={planetMeshRef} variant={variant} />
 
-      {/* Scene objects */}
       <Stars />
       <PlanetCore variant={variant} isHovered={isHovered} meshRef={planetMeshRef} />
       <AtmosphereGlow variant={variant} isHovered={isHovered} />
       <OuterGlow      variant={variant} isHovered={isHovered} />
 
-      {/* Rings */}
-      <OrbitalRing radius={3.4} tilt={Math.PI * 0.12}  speed={0.08}  color={orbitColor} opacity={ringOpacity} />
-      <OrbitalRing radius={4.1} tilt={-Math.PI * 0.22} speed={-0.05} color={orbitColor} opacity={ringOpacity * 0.65} />
-      <OrbitalRing radius={5.0} tilt={Math.PI * 0.35}  speed={0.03}  color={orbitColor} opacity={ringOpacity * 0.4} />
+      {/*
+        Three rings, each on its own tilted orbital plane.
+        tiltX = inclination from equatorial; speed varies direction + pace.
+        All three rotate on pivotRef.rotation.y = full self-orbit.
+      */}
+      <OrbitalRing
+        radius={3.5}
+        tiltX={Math.PI * 0.08}
+        tiltY={0}
+        speed={0.55}          // fast inner ring
+        color={orbitColor}
+        opacity={ringOpacity}
+        thickness={0.035}
+      />
+      <OrbitalRing
+        radius={4.3}
+        tiltX={-Math.PI * 0.3}
+        tiltY={Math.PI * 0.1}
+        speed={-0.32}         // counter-orbits
+        color={orbitColor}
+        opacity={ringOpacity * 0.65}
+        thickness={0.025}
+      />
+      <OrbitalRing
+        radius={5.2}
+        tiltX={Math.PI * 0.45}
+        tiltY={Math.PI * 0.2}
+        speed={0.18}          // slow outer ring
+        color={orbitColor}
+        opacity={ringOpacity * 0.4}
+        thickness={0.018}
+      />
 
       {/* Data nodes */}
-      <DataOrbit radius={3.4} speed={0.6}  offset={0}              color={orbitColor} />
-      <DataOrbit radius={3.4} speed={0.6}  offset={Math.PI * 0.66} color={orbitColor} />
-      <DataOrbit radius={3.4} speed={0.6}  offset={Math.PI * 1.33} color={orbitColor} />
-      <DataOrbit radius={4.1} speed={-0.4} offset={Math.PI * 0.5}  color={orbitColor} />
-      <DataOrbit radius={4.1} speed={-0.4} offset={Math.PI * 1.5}  color={orbitColor} />
+      <DataOrbit radius={3.5} speed={0.7}  offset={0}              color={orbitColor} />
+      <DataOrbit radius={3.5} speed={0.7}  offset={Math.PI * 0.66} color={orbitColor} />
+      <DataOrbit radius={3.5} speed={0.7}  offset={Math.PI * 1.33} color={orbitColor} />
+      <DataOrbit radius={4.3} speed={-0.45} offset={Math.PI * 0.5}  color={orbitColor} />
+      <DataOrbit radius={4.3} speed={-0.45} offset={Math.PI * 1.5}  color={orbitColor} />
     </>
   );
 }

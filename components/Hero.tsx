@@ -36,7 +36,7 @@ const VARIANT_CONTENT: Record<
   explore: {
     eyebrow: "Premium Web Studio",
     headline: ["Make Your Brand Stand Out Online"],
-    sub: "We build websites that look premium, feel intentional, and earn trust instantly.,We design modern websites that immediately capture attention and build credibility.",
+    sub: "We build websites that look premium, feel intentional, and earn trust crediblity",
     cta: "See Work",
     badge: "Start Project",
   },
@@ -60,7 +60,7 @@ const VARIANT_CONTENT: Record<
 
 const VARIANT_TABS: { id: HeroVariant; label: string }[] = [
   { id: "explore", label: "attract" },
-  { id: "build",   label: "Build"   },
+  { id: "build",   label:"build"},
   { id: "deploy",  label: "grow"  },
 ];
 
